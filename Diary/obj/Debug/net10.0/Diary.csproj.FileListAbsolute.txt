@@ -1,0 +1,14 @@
+D:\Diary\bin\Debug\net10.0\Diary.exe
+D:\Diary\bin\Debug\net10.0\Diary.deps.json
+D:\Diary\bin\Debug\net10.0\Diary.runtimeconfig.json
+D:\Diary\bin\Debug\net10.0\Diary.dll
+D:\Diary\bin\Debug\net10.0\Diary.pdb
+D:\Diary\obj\Debug\net10.0\Diary.GeneratedMSBuildEditorConfig.editorconfig
+D:\Diary\obj\Debug\net10.0\Diary.AssemblyInfoInputs.cache
+D:\Diary\obj\Debug\net10.0\Diary.AssemblyInfo.cs
+D:\Diary\obj\Debug\net10.0\Diary.csproj.CoreCompileInputs.cache
+D:\Diary\obj\Debug\net10.0\Diary.dll
+D:\Diary\obj\Debug\net10.0\refint\Diary.dll
+D:\Diary\obj\Debug\net10.0\Diary.pdb
+D:\Diary\obj\Debug\net10.0\Diary.genruntimeconfig.cache
+D:\Diary\obj\Debug\net10.0\ref\Diary.dll
