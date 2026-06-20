@@ -1,30 +1,25 @@
-﻿using System;
+﻿using Diary;
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
+using System.Text;
 
-namespace DiaryApp
+namespace Diary
 {
-    class Event
-    {
-        public DateTime Start { get; set; }
-        public TimeSpan Duration { get; set; }
-        public string Place { get; set; }
-
-        public override string ToString()
-        {
-            return $"{Start:dd.MM.yyyy HH:mm} - {Start.Add(Duration):HH:mm} ({Duration.TotalMinutes} хв) : {Place}";
-        }
-    }
-
     class Program
     {
-        static List<Event> events = new List<Event>();
-        static string filePath = "diary.json";
+        private static DiaryManager _manager;
+        private static FileStorage _storage;
+        private const string FilePath = "diary.json";
 
         static void Main()
         {
-            LoadFromFile();
+            Console.OutputEncoding = Encoding.UTF8;
+            Console.InputEncoding = Encoding.UTF8;
+
+            _storage = new FileStorage(FilePath);
+            var events = _storage.Load();
+            _manager = new DiaryManager(events);
 
             bool exit = false;
             while (!exit)
@@ -57,7 +52,7 @@ namespace DiaryApp
                     case "8": DeleteEvent(); break;
                     case "9": SearchEvents(); break;
                     case "10": ShowAbout(); break;
-                    case "0": SaveToFile(); exit = true; break;
+                    case "0": _storage.Save(_manager.Events); exit = true; break;
                     default: Console.WriteLine("Невірний вибір. Натисніть будь-яку клавішу..."); Console.ReadKey(); break;
                 }
             }
@@ -68,10 +63,10 @@ namespace DiaryApp
             Console.Clear();
             Console.WriteLine("=== Додавання заходу (введіть 0 на будь-якому кроці для скасування) ===");
 
-            DateTime start = ReadDate("Введіть дату (дд.мм.рррр) або 0 для виходу: ", allowExit: true);
+            DateTime start = ReadDate("Введіть дату (дд.мм.рррр): ", allowExit: true);
             if (start == DateTime.MinValue)
             {
-                Console.WriteLine("Додавання скасовано.");
+                Console.WriteLine("Додавання скасовано. Повернення до головного меню...");
                 Console.ReadKey();
                 return;
             }
@@ -79,7 +74,7 @@ namespace DiaryApp
             DateTime time = ReadTime("Введіть час (гг:хх): ", allowExit: true);
             if (time == DateTime.MinValue)
             {
-                Console.WriteLine("Додавання скасовано.");
+                Console.WriteLine("Додавання скасовано. Повернення до головного меню...");
                 Console.ReadKey();
                 return;
             }
@@ -88,7 +83,7 @@ namespace DiaryApp
             int minutes = ReadPositiveInt("Введіть тривалість (хвилини): ", allowExit: true);
             if (minutes == 0)
             {
-                Console.WriteLine("Додавання скасовано.");
+                Console.WriteLine("Додавання скасовано. Повернення до головного меню...");
                 Console.ReadKey();
                 return;
             }
@@ -96,13 +91,13 @@ namespace DiaryApp
             string place = ReadString("Введіть місце проведення: ", allowExit: true);
             if (place == null)
             {
-                Console.WriteLine("Додавання скасовано.");
+                Console.WriteLine("Додавання скасовано. Повернення до головного меню...");
                 Console.ReadKey();
                 return;
             }
 
-            events.Add(new Event { Start = start, Duration = TimeSpan.FromMinutes(minutes), Place = place });
-            SaveToFile();
+            _manager.AddEvent(new Event { Start = start, Duration = TimeSpan.FromMinutes(minutes), Place = place });
+            _storage.Save(_manager.Events);
             Console.WriteLine("Захід додано. Натисніть будь-яку клавішу...");
             Console.ReadKey();
         }
@@ -111,10 +106,11 @@ namespace DiaryApp
         {
             Console.Clear();
             Console.WriteLine("=== Всі заходи ===");
+            var events = _manager.Events;
             if (events.Count == 0) Console.WriteLine("Список заходів порожній.");
             else
             {
-                events.Sort((a, b) => a.Start.CompareTo(b.Start));
+                _manager.SortEvents();
                 for (int i = 0; i < events.Count; i++)
                     Console.WriteLine($"{i + 1}. {events[i]}");
             }
@@ -130,7 +126,12 @@ namespace DiaryApp
                 Console.WriteLine("=== Перегляд заходів на день (-1 – вихід) ===");
                 Console.Write("Введіть зміщення днів (0 – сьогодні, 1 – завтра, ...): ");
                 string input = Console.ReadLine();
-                if (input == "-1") break;
+                if (input == "-1")
+                {
+                    Console.WriteLine("Повернення до головного меню...");
+                    Console.ReadKey();
+                    break;
+                }
 
                 if (!int.TryParse(input, out int offset) || offset < 0)
                 {
@@ -140,7 +141,7 @@ namespace DiaryApp
                 }
 
                 DateTime targetDate = DateTime.Today.AddDays(offset);
-                var filtered = events.FindAll(e => e.Start.Date == targetDate);
+                var filtered = _manager.GetEventsByDate(targetDate);
                 filtered.Sort((a, b) => a.Start.CompareTo(b.Start));
 
                 Console.WriteLine($"Заходи на {targetDate:dd.MM.yyyy}:");
@@ -156,12 +157,7 @@ namespace DiaryApp
         {
             Console.Clear();
             Console.WriteLine("=== Нагадування про найближчий захід ===");
-            DateTime now = DateTime.Now;
-            Event nearest = null;
-            foreach (var ev in events)
-                if (ev.Start >= now && (nearest == null || ev.Start < nearest.Start))
-                    nearest = ev;
-
+            var nearest = _manager.GetNearest();
             Console.WriteLine(nearest == null ? "Найближчих заходів немає." : $"Найближчий захід: {nearest}");
             Console.WriteLine("Натисніть будь-яку клавішу...");
             Console.ReadKey();
@@ -173,8 +169,7 @@ namespace DiaryApp
             {
                 Console.Clear();
                 Console.WriteLine("=== Робота з минулими заходами (0 – вихід) ===");
-                DateTime now = DateTime.Now;
-                var pastEvents = events.FindAll(e => e.Start < now);
+                var pastEvents = _manager.GetPastEvents();
 
                 if (pastEvents.Count == 0)
                 {
@@ -196,60 +191,88 @@ namespace DiaryApp
                 Console.WriteLine("0. Повернутися до головного меню");
                 Console.Write("Ваш вибір: ");
                 string action = Console.ReadLine();
-                if (action == "0") break;
+                if (action == "0")
+                {
+                    Console.WriteLine("Повернення до головного меню...");
+                    Console.ReadKey();
+                    break;
+                }
 
                 if (action == "1" || action == "3")
                 {
-                    Console.Write("Введіть номер заходу (0 – вихід): ");
-                    if (!int.TryParse(Console.ReadLine(), out int idx))
+                    while (true)
                     {
-                        Console.WriteLine("Невірний номер.");
-                        Console.ReadKey();
-                        continue;
-                    }
-                    if (idx == 0) break;
+                        Console.Write("Введіть номер заходу (0 для виходу до попереднього меню): ");
+                        if (!int.TryParse(Console.ReadLine(), out int idx))
+                        {
+                            Console.WriteLine("Помилка! Введіть ціле число.");
+                            continue;
+                        }
+                        if (idx == 0)
+                        {
+                            Console.WriteLine("Повернення до списку дій...");
+                            Console.ReadKey();
+                            break;
+                        }
+                        if (idx < 1 || idx > pastEvents.Count)
+                        {
+                            Console.WriteLine($"Помилка! Введіть число від 1 до {pastEvents.Count}.");
+                            continue;
+                        }
+                        Event ev = pastEvents[idx - 1];
 
-                    if (idx < 1 || idx > pastEvents.Count)
-                    {
-                        Console.WriteLine("Невірний номер.");
+                        if (action == "1")
+                        {
+                            _manager.RemoveEvent(ev);
+                            _storage.Save(_manager.Events);
+                            Console.WriteLine("Захід видалено.");
+                        }
+                        else
+                        {
+                            DateTime newDate = ReadDate("Введіть нову дату (дд.мм.рррр): ", allowExit: true);
+                            if (newDate == DateTime.MinValue)
+                            {
+                                Console.WriteLine("Операцію скасовано.");
+                                Console.ReadKey();
+                                break;
+                            }
+                            ev.Start = newDate.Date + ev.Start.TimeOfDay;
+                            _storage.Save(_manager.Events);
+                            Console.WriteLine("Захід перенесено.");
+                        }
+                        Console.WriteLine("Натисніть будь-яку клавішу...");
                         Console.ReadKey();
-                        continue;
-                    }
-                    Event ev = pastEvents[idx - 1];
-
-                    if (action == "1")
-                    {
-                        events.Remove(ev);
-                        SaveToFile();
-                        Console.WriteLine("Захід видалено.");
-                    }
-                    else
-                    {
-                        DateTime newDate = ReadDate("Введіть нову дату (дд.мм.рррр) або 0 для виходу: ", allowExit: true);
-                        if (newDate == DateTime.MinValue) break;
-                        ev.Start = newDate.Date + ev.Start.TimeOfDay;
-                        SaveToFile();
-                        Console.WriteLine("Захід перенесено.");
+                        break;
                     }
                 }
                 else if (action == "2")
                 {
-                    foreach (var ev in pastEvents) events.Remove(ev);
-                    SaveToFile();
+                    _manager.DeletePastEvents();
+                    _storage.Save(_manager.Events);
                     Console.WriteLine("Всі минулі заходи видалено.");
+                    Console.WriteLine("Натисніть будь-яку клавішу...");
+                    Console.ReadKey();
                 }
                 else if (action == "4")
                 {
-                    DateTime newDate = ReadDate("Введіть нову дату (дд.мм.рррр) або 0 для виходу: ", allowExit: true);
-                    if (newDate == DateTime.MinValue) break;
-                    foreach (var ev in pastEvents) ev.Start = newDate.Date + ev.Start.TimeOfDay;
-                    SaveToFile();
+                    DateTime newDate = ReadDate("Введіть нову дату (дд.мм.рррр): ", allowExit: true);
+                    if (newDate == DateTime.MinValue)
+                    {
+                        Console.WriteLine("Операцію скасовано.");
+                        Console.ReadKey();
+                        continue;
+                    }
+                    _manager.MovePastEvents(newDate);
+                    _storage.Save(_manager.Events);
                     Console.WriteLine("Всі заходи перенесено.");
+                    Console.WriteLine("Натисніть будь-яку клавішу...");
+                    Console.ReadKey();
                 }
-                else Console.WriteLine("Невірна дія.");
-
-                Console.WriteLine("Натисніть будь-яку клавішу...");
-                Console.ReadKey();
+                else
+                {
+                    Console.WriteLine("Невірна дія.");
+                    Console.ReadKey();
+                }
             }
         }
 
@@ -257,26 +280,15 @@ namespace DiaryApp
         {
             Console.Clear();
             Console.WriteLine("=== Аналіз накладок (перетинів) ===");
-            events.Sort((a, b) => a.Start.CompareTo(b.Start));
-            bool overlapFound = false;
-            for (int i = 0; i < events.Count; i++)
-                for (int j = i + 1; j < events.Count; j++)
-                {
-                    var a = events[i];
-                    var b = events[j];
-                    DateTime aEnd = a.Start.Add(a.Duration);
-                    DateTime bEnd = b.Start.Add(b.Duration);
-                    if (a.Start < bEnd && b.Start < aEnd)
-                    {
-                        if (!overlapFound)
-                        {
-                            Console.WriteLine("Знайдені перетини:");
-                            overlapFound = true;
-                        }
-                        Console.WriteLine($"- {a} перетинається з {b}");
-                    }
-                }
-            if (!overlapFound) Console.WriteLine("Накладок не знайдено.");
+            var overlaps = _manager.FindOverlaps();
+            if (overlaps.Count == 0)
+                Console.WriteLine("Накладок не знайдено.");
+            else
+            {
+                Console.WriteLine("Знайдені перетини:");
+                foreach (var ev in overlaps)
+                    Console.WriteLine($"- {ev}");
+            }
             Console.WriteLine("Натисніть будь-яку клавішу...");
             Console.ReadKey();
         }
@@ -287,6 +299,7 @@ namespace DiaryApp
             {
                 Console.Clear();
                 Console.WriteLine("=== Редагування заходу (0 – вихід) ===");
+                var events = _manager.Events;
                 if (events.Count == 0)
                 {
                     Console.WriteLine("Список заходів порожній.");
@@ -294,7 +307,7 @@ namespace DiaryApp
                     return;
                 }
 
-                events.Sort((a, b) => a.Start.CompareTo(b.Start));
+                _manager.SortEvents();
                 for (int i = 0; i < events.Count; i++)
                     Console.WriteLine($"{i + 1}. {events[i]}");
 
@@ -302,7 +315,7 @@ namespace DiaryApp
                 string input = Console.ReadLine();
                 if (input == "0")
                 {
-                    Console.WriteLine("Вихід з редагування.");
+                    Console.WriteLine("Вихід з редагування...");
                     Console.ReadKey();
                     return;
                 }
@@ -325,6 +338,7 @@ namespace DiaryApp
                     Console.WriteLine("3. Тривалість");
                     Console.WriteLine("4. Місце");
                     Console.WriteLine("5. Вибрати інший захід");
+                    Console.WriteLine("0. Вийти");
                     Console.Write("Ваш вибір: ");
                     string choice = Console.ReadLine();
 
@@ -335,41 +349,48 @@ namespace DiaryApp
                         break;
                     }
 
+                    if (choice == "0")
+                    {
+                        Console.WriteLine("Повернення до головного меню...");
+                        Console.ReadKey();
+                        return;
+                    }
+
                     switch (choice)
                     {
                         case "1":
                             DateTime newDate = ReadDate("Введіть нову дату (дд.мм.рррр) або 0 для виходу без змін: ", allowExit: true);
                             if (newDate == DateTime.MinValue) break;
                             ev.Start = newDate.Date + ev.Start.TimeOfDay;
-                            SaveToFile();
+                            _storage.Save(_manager.Events);
                             Console.WriteLine("Дату змінено.");
                             break;
                         case "2":
                             DateTime newTime = ReadTime("Введіть новий час (гг:хх) або 0 для виходу без змін: ", allowExit: true);
                             if (newTime == DateTime.MinValue) break;
                             ev.Start = ev.Start.Date + newTime.TimeOfDay;
-                            SaveToFile();
+                            _storage.Save(_manager.Events);
                             Console.WriteLine("Час змінено.");
                             break;
                         case "3":
                             int newDur = ReadPositiveInt("Введіть нову тривалість (хвилини) або 0 для виходу без змін: ", allowExit: true);
                             if (newDur == 0) break;
                             ev.Duration = TimeSpan.FromMinutes(newDur);
-                            SaveToFile();
+                            _storage.Save(_manager.Events);
                             Console.WriteLine("Тривалість змінено.");
                             break;
                         case "4":
                             string newPlace = ReadString("Введіть нове місце (або 0 для виходу без змін): ", allowExit: true);
                             if (newPlace == null) break;
                             ev.Place = newPlace;
-                            SaveToFile();
+                            _storage.Save(_manager.Events);
                             Console.WriteLine("Місце змінено.");
                             break;
                         default:
                             Console.WriteLine("Невірний вибір.");
                             continue;
                     }
-                    Console.WriteLine("Продовжуйте редагування або виберіть 0 або 5 для виходу.");
+                    Console.WriteLine("Продовжуйте редагування або натисніть 5 для вибору іншої події чи 0 для виходу.");
                 }
             }
         }
@@ -380,30 +401,49 @@ namespace DiaryApp
             {
                 Console.Clear();
                 Console.WriteLine("=== Видалення заходу (0 – вихід) ===");
+
+                var events = _manager.Events;
                 if (events.Count == 0)
                 {
                     Console.WriteLine("Список заходів порожній.");
                     Console.ReadKey();
-                    break;
+                    return;
                 }
 
-                events.Sort((a, b) => a.Start.CompareTo(b.Start));
+                _manager.SortEvents();
                 for (int i = 0; i < events.Count; i++)
                     Console.WriteLine($"{i + 1}. {events[i]}");
 
-                Console.Write("\nВведіть номер заходу для видалення: ");
-                if (!int.TryParse(Console.ReadLine(), out int index) || index == 0) break;
-                if (index < 1 || index > events.Count)
+                while (true)
                 {
-                    Console.WriteLine("Невірний номер.");
-                    Console.ReadKey();
-                    continue;
-                }
+                    Console.Write("\nВведіть номер заходу для видалення (або 0 для виходу): ");
+                    string input = Console.ReadLine();
 
-                events.RemoveAt(index - 1);
-                SaveToFile();
-                Console.WriteLine("Захід видалено.");
-                Console.ReadKey();
+                    if (!int.TryParse(input, out int index))
+                    {
+                        Console.WriteLine("Помилка! Введіть число.");
+                        continue;
+                    }
+
+                    if (index == 0)
+                    {
+                        Console.WriteLine("Повернення до головного меню...");
+                        Console.ReadKey();
+                        return;
+                    }
+
+                    if (index < 1 || index > events.Count)
+                    {
+                        Console.WriteLine($"Невірний номер. Введіть число від 1 до {events.Count}.");
+                        continue;
+                    }
+
+                    _manager.RemoveAt(index - 1);
+                    _storage.Save(_manager.Events);
+                    Console.WriteLine("Захід видалено.");
+                    Console.ReadKey();
+                    break;
+                }
             }
         }
 
@@ -419,243 +459,104 @@ namespace DiaryApp
             {
                 Console.Write("Дата (від) [дд.мм.рррр] або Enter: ");
                 string input = Console.ReadLine();
-                if (input == "0")
-                {
-                    exit = true;
-                    break;
-                }
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    dateFrom = null;
-                    break;
-                }
+                if (input == "0") { exit = true; break; }
+                if (string.IsNullOrWhiteSpace(input)) { dateFrom = null; break; }
                 if (DateTime.TryParseExact(input, "dd.MM.yyyy", null, System.Globalization.DateTimeStyles.None, out DateTime d))
-                {
-                    dateFrom = d;
-                    break;
-                }
+                { dateFrom = d; break; }
                 Console.WriteLine("Помилка! Введіть дату у форматі дд.мм.рррр або натисніть Enter.");
             }
-            if (exit)
-            {
-                Console.WriteLine("Вихід. Натисніть будь-яку клавішу...");
-                Console.ReadKey();
-                return;
-            }
+            if (exit) { Console.WriteLine("Вихід. Натисніть будь-яку клавішу..."); Console.ReadKey(); return; }
 
             DateTime? dateTo = null;
             while (true)
             {
                 Console.Write("Дата (до) [дд.мм.рррр] або Enter: ");
                 string input = Console.ReadLine();
-                if (input == "0")
-                {
-                    exit = true;
-                    break;
-                }
-
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    dateTo = null;
-                    break;
-                }
+                if (input == "0") { exit = true; break; }
+                if (string.IsNullOrWhiteSpace(input)) { dateTo = null; break; }
                 if (DateTime.TryParseExact(input, "dd.MM.yyyy", null, System.Globalization.DateTimeStyles.None, out DateTime d))
-                {
-                    dateTo = d;
-                    break;
-                }
+                { dateTo = d; break; }
                 Console.WriteLine("Помилка! Введіть дату у форматі дд.мм.рррр або натисніть Enter.");
             }
-            if (exit)
-            {
-                Console.WriteLine("Вихід. Натисніть будь-яку клавішу...");
-                Console.ReadKey();
-                return;
-            }
+            if (exit) { Console.WriteLine("Вихід. Натисніть будь-яку клавішу..."); Console.ReadKey(); return; }
 
             TimeSpan? timeFrom = null;
             while (true)
             {
                 Console.Write("Час (від) [гг:хх] або Enter: ");
                 string input = Console.ReadLine();
-                if (input == "0")
-                {
-                    exit = true;
-                    break;
-                }
-
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    timeFrom = null;
-                    break;
-                }
+                if (input == "0") { exit = true; break; }
+                if (string.IsNullOrWhiteSpace(input)) { timeFrom = null; break; }
                 if (DateTime.TryParseExact(input, "HH:mm", null, System.Globalization.DateTimeStyles.None, out DateTime t))
-                {
-                    timeFrom = t.TimeOfDay;
-                    break;
-                }
+                { timeFrom = t.TimeOfDay; break; }
                 Console.WriteLine("Помилка! Введіть час у форматі гг:хх або натисніть Enter.");
             }
-            if (exit)
-            {
-                Console.WriteLine("Вихід. Натисніть будь-яку клавішу...");
-                Console.ReadKey();
-                return;
-            }
+            if (exit) { Console.WriteLine("Вихід. Натисніть будь-яку клавішу..."); Console.ReadKey(); return; }
 
             TimeSpan? timeTo = null;
             while (true)
             {
                 Console.Write("Час (до) [гг:хх] або Enter: ");
                 string input = Console.ReadLine();
-                if (input == "0")
-                {
-                    exit = true;
-                    break;
-                }
-
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    timeTo = null;
-                    break;
-                }
+                if (input == "0") { exit = true; break; }
+                if (string.IsNullOrWhiteSpace(input)) { timeTo = null; break; }
                 if (DateTime.TryParseExact(input, "HH:mm", null, System.Globalization.DateTimeStyles.None, out DateTime t))
-                {
-                    timeTo = t.TimeOfDay;
-                    break;
-                }
+                { timeTo = t.TimeOfDay; break; }
                 Console.WriteLine("Помилка! Введіть час у форматі гг:хх або натисніть Enter.");
             }
-            if (exit)
-            {
-                Console.WriteLine("Вихід. Натисніть будь-яку клавішу...");
-                Console.ReadKey();
-                return;
-            }
+            if (exit) { Console.WriteLine("Вихід. Натисніть будь-яку клавішу..."); Console.ReadKey(); return; }
 
             int? durFrom = null;
             while (true)
             {
                 Console.Write("Тривалість (від) [хвилини] або Enter: ");
                 string input = Console.ReadLine();
-                if (input == "0")
-                {
-                    exit = true;
-                    break;
-                }
-
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    durFrom = null;
-                    break;
-                }
-                if (int.TryParse(input, out int d) && d >= 0)
-                {
-                    durFrom = d;
-                    break;
-                }
+                if (input == "0") { exit = true; break; }
+                if (string.IsNullOrWhiteSpace(input)) { durFrom = null; break; }
+                if (int.TryParse(input, out int d) && d >= 0) { durFrom = d; break; }
                 Console.WriteLine("Помилка! Введіть ціле невід'ємне число або натисніть Enter.");
             }
-            if (exit)
-            {
-                Console.WriteLine("Вихід. Натисніть будь-яку клавішу...");
-                Console.ReadKey();
-                return;
-            }
+            if (exit) { Console.WriteLine("Вихід. Натисніть будь-яку клавішу..."); Console.ReadKey(); return; }
 
             int? durTo = null;
             while (true)
             {
                 Console.Write("Тривалість (до) [хвилини] або Enter: ");
                 string input = Console.ReadLine();
-                if (input == "0")
-                {
-                    exit = true;
-                    break;
-                }
-
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    durTo = null;
-                    break;
-                }
-                if (int.TryParse(input, out int d) && d >= 0)
-                {
-                    durTo = d;
-                    break;
-                }
+                if (input == "0") { exit = true; break; }
+                if (string.IsNullOrWhiteSpace(input)) { durTo = null; break; }
+                if (int.TryParse(input, out int d) && d >= 0) { durTo = d; break; }
                 Console.WriteLine("Помилка! Введіть ціле невід'ємне число або натисніть Enter.");
             }
-            if (exit)
-            {
-                Console.WriteLine("Вихід. Натисніть будь-яку клавішу...");
-                Console.ReadKey();
-                return;
-            }
+            if (exit) { Console.WriteLine("Вихід. Натисніть будь-яку клавішу..."); Console.ReadKey(); return; }
 
             string placeSubstring = null;
             while (true)
             {
                 Console.Write("Місце (частина назви) або Enter: ");
                 string input = Console.ReadLine();
-                if (input == "0")
-                {
-                    exit = true;
-                    break;
-                }
+                if (input == "0") { exit = true; break; }
+                if (string.IsNullOrWhiteSpace(input)) { placeSubstring = null; break; }
+                placeSubstring = input.Trim(); break;
+            }
+            if (exit) { Console.WriteLine("Вихід. Натисніть будь-яку клавішу..."); Console.ReadKey(); return; }
 
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    placeSubstring = null;
-                    break;
-                }
-                placeSubstring = input.Trim();
-                break;
-            }
-            if (exit)
-            {
-                Console.WriteLine("Вихід. Натисніть будь-яку клавішу...");
-                Console.ReadKey();
-                return;
-            }
-
-            var results = new List<Event>();
-            foreach (var ev in events)
-            {
-                bool match = true;
-                if (dateFrom.HasValue && ev.Start.Date < dateFrom.Value) match = false;
-                if (dateTo.HasValue && ev.Start.Date > dateTo.Value) match = false;
-                if (timeFrom.HasValue && ev.Start.TimeOfDay < timeFrom.Value) match = false;
-                if (timeTo.HasValue && ev.Start.TimeOfDay > timeTo.Value) match = false;
-                if (durFrom.HasValue && ev.Duration.TotalMinutes < durFrom.Value) match = false;
-                if (durTo.HasValue && ev.Duration.TotalMinutes > durTo.Value) match = false;
-                if (!string.IsNullOrEmpty(placeSubstring) && !ev.Place.Contains(placeSubstring, StringComparison.OrdinalIgnoreCase))
-                    match = false;
-                if (match) results.Add(ev);
-            }
+            var results = _manager.Search(dateFrom, dateTo, timeFrom, timeTo, durFrom, durTo, placeSubstring);
 
             Console.Clear();
             Console.WriteLine("=== Результати пошуку ===");
             if (results.Count == 0)
-            {
                 Console.WriteLine("Заходів, що відповідають критеріям, не знайдено.");
-            }
             else
-            {
-                results.Sort((a, b) => a.Start.CompareTo(b.Start));
                 for (int i = 0; i < results.Count; i++)
                     Console.WriteLine($"{i + 1}. {results[i]}");
-            }
 
             Console.Write("\nЗберегти результати у файл? (т/н): ");
             while (true)
             {
                 string answer = Console.ReadLine()?.Trim().ToLower();
                 if (answer != "н" && answer != "т")
-                {
-                    Console.Write("Уведіть \"т\" або \"н\" ");
-                    continue;
-                }
+                { Console.Write("Уведіть \"т\" або \"н\" "); continue; }
 
                 if (answer == "т")
                 {
@@ -684,16 +585,10 @@ namespace DiaryApp
                             Console.WriteLine($"Помилка при збереженні: {ex.Message}");
                         }
                     }
-                    else
-                    {
-                        Console.WriteLine("Шлях не вказано – збереження скасовано.");
-                    }
+                    else Console.WriteLine("Шлях не вказано – збереження скасовано.");
                 }
-                else
-                {
-                    Console.WriteLine("Збереження скасовано.");
-                    break;
-                }
+                else Console.WriteLine("Збереження скасовано.");
+                break;
             }
 
             Console.WriteLine("Натисніть будь-яку клавішу...");
@@ -729,7 +624,7 @@ namespace DiaryApp
             {
                 Console.Write(prompt);
                 string input = Console.ReadLine();
-                if (allowExit && (input == "0")) return DateTime.MinValue;
+                if (allowExit && input == "0") return DateTime.MinValue;
                 if (DateTime.TryParseExact(input, "dd.MM.yyyy", null, System.Globalization.DateTimeStyles.None, out DateTime date))
                     return date;
                 Console.WriteLine("Помилка! Введіть дату у форматі дд.мм.рррр (наприклад, 31.12.2025).");
@@ -742,7 +637,7 @@ namespace DiaryApp
             {
                 Console.Write(prompt);
                 string input = Console.ReadLine();
-                if (allowExit && (input == "0")) return DateTime.MinValue;
+                if (allowExit && input == "0") return DateTime.MinValue;
                 if (DateTime.TryParseExact(input, "HH:mm", null, System.Globalization.DateTimeStyles.None, out DateTime time))
                     return time;
                 Console.WriteLine("Помилка! Введіть час у форматі гг:хх (наприклад, 14:30).");
@@ -755,7 +650,7 @@ namespace DiaryApp
             {
                 Console.Write(prompt);
                 string input = Console.ReadLine();
-                if (allowExit && (input == "0")) return 0;
+                if (allowExit && input == "0") return 0;
                 if (int.TryParse(input, out int value) && value > 0) return value;
                 Console.WriteLine("Помилка! Введіть ціле додатнє число.");
             }
@@ -767,35 +662,10 @@ namespace DiaryApp
             {
                 Console.Write(prompt);
                 string input = Console.ReadLine();
-                if (allowExit && (input == "0")) return null;
+                if (allowExit && input == "0") return null;
                 if (!string.IsNullOrWhiteSpace(input)) return input.Trim();
                 Console.WriteLine("Поле не може бути порожнім.");
             }
-        }
-
-        static void SaveToFile()
-        {
-            try
-            {
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                string json = JsonSerializer.Serialize(events, options);
-                File.WriteAllText(filePath, json);
-            }
-            catch { }
-        }
-
-        static void LoadFromFile()
-        {
-            if (File.Exists(filePath))
-            {
-                try
-                {
-                    string json = File.ReadAllText(filePath);
-                    events = JsonSerializer.Deserialize<List<Event>>(json) ?? new List<Event>();
-                }
-                catch { events = new List<Event>(); }
-            }
-            else events = new List<Event>();
         }
     }
 }
